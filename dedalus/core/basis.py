@@ -1761,7 +1761,7 @@ class Fourier(TransverseBasis):
     coupled = False
     element_label= 'k'
 
-    def __init__(self, name, base_grid_size, interval=(0,2*pi), dealias=1):
+    def __init__(self, name, base_grid_size, interval=(0,2*pi), dealias=1,cutoff=0,hyp=1):
 
         # Coordinate transformation
         # Native interval: (0, 2π)
@@ -1777,11 +1777,17 @@ class Fourier(TransverseBasis):
         self.base_grid_size = base_grid_size
         self.interval = tuple(interval)
         self.dealias = dealias
+        #self.cutoff = cutoff
         self.library = DEFAULT_LIBRARY
         self.operators = (self.Integrate,
                           self.Interpolate,
                           self.Differentiate,
+                          self.DifferentiateFilter,
+                          self.HyperDiffusion,
                           self.HilbertTransform)
+
+        self.cutoff=cutoff
+        self.hyp=hyp
 
     def default_meta(self):
         return {'constant': False}
@@ -1807,6 +1813,33 @@ class Fourier(TransverseBasis):
         self.coeff_dtype = np.dtype(np.complex128)
         # Build native wavenumbers, discarding any Nyquist mode
         kmax = (self.base_grid_size - 1) // 2
+        kmax=int(kmax)
+        self.filter1=np.zeros(kmax+1,dtype=np.complex128)         #my code
+        self.filter1[self.cutoff::]=1j
+        hyp=self.hyp
+        self.filter2=np.ones(kmax+1,dtype=np.float64)
+        self.filter3=np.ones(kmax+1,dtype=np.float64)
+        for i in range(kmax+1):
+            if i>self.cutoff:
+                self.filter2[i] = hyp**(i-self.cutoff)
+                self.filter3[i] = np.sqrt(hyp**(i-self.cutoff))
+        #print("filter1:",self.filter1)
+        #print("filter2:",self.filter2)
+        #print("filter3:",self.filter3)
+        """
+        need to edit this to make the hyperdiffusion work correctly.
+        need to multiply self.wavenumbers by sqrt of some coefficient, and then
+        perform the operation twice, which should square it back out for
+        the proper hyperdiffusion term. May also need to raise
+        self.wavenumbers to a power of some sort, too tired to work
+        it out right now.
+
+        self.power = np.ones(kmax+1)
+        hyp=self.hyp
+        for i in range(kmax+1):
+            self.power[i] =
+        #my code
+        """
         if self.grid_dtype == np.float64:
             native_wavenumbers = np.arange(0, kmax+1)
         elif self.grid_dtype == np.complex128:
@@ -1814,6 +1847,7 @@ class Fourier(TransverseBasis):
         # Scale native wavenumbers
         self.elements = self.wavenumbers = native_wavenumbers / self._grid_stretch
         self.coeff_size = self.elements.size
+        #print("wavenumbers:",self.wavenumbers)
         return self.coeff_dtype
 
     def _resize_real_coeffs(self, cdata_in, cdata_out, axis, grid_size):
@@ -2028,6 +2062,65 @@ class Fourier(TransverseBasis):
                 return 1j * cls.basis.wavenumbers
 
         return DifferentiateFourier
+
+    @CachedAttribute
+    def DifferentiateFilter(self):
+        """Build differentiation class."""
+
+        class DifferentiateFilterFourier(operators.DifferentiateFilter, operators.Separable):
+            name = 'df' + self.name
+            basis = self
+            #cutoff=self.cutoff
+
+            @classmethod
+            @CachedMethod
+            def vector_form(cls):
+                #vector=self.filter_vec
+                #return 1j * cls.basis.wavenumbers
+                #print(cls.basis.wavenumbers)
+                #print(cls.basis.filter1)
+                """
+                change this to
+
+                return cls.basis.filter2 * cls.basis.wavenumbers **2
+                where cls.basis.filter2 is 1.03(-ish)**(how far above cutoff)
+
+                Then don't do the operation 4 times, just do it once!!!
+                """
+                return cls.basis.filter1 * cls.basis.wavenumbers
+                #return (-1) * cls.basis.filter2 * cls.basis.wavenumbers**2
+
+        return DifferentiateFilterFourier
+
+    @CachedAttribute
+    def HyperDiffusion(self):
+        """Build hyperdiffusion class."""
+
+        class HyperDiffusionFourier(operators.HyperDiffusion, operators.Separable):
+            name = 'hd' + self.name
+            basis = self
+            #cutoff=self.cutoff
+
+            @classmethod
+            @CachedMethod
+            def vector_form(cls):
+                #vector=self.filter_vec
+                #return 1j * cls.basis.wavenumbers
+                #print(cls.basis.wavenumbers)
+                #print(cls.basis.filter2)
+                """
+                change this to
+
+                return cls.basis.filter2 * cls.basis.wavenumbers **2
+                where cls.basis.filter2 is 1.03(-ish)**(how far above cutoff)
+
+                Then don't do the operation 4 times, just do it once!!!
+                """
+                #return cls.basis.filter1 * cls.basis.wavenumbers
+                #return (-1) * cls.basis.filter2 * cls.basis.wavenumbers**2
+                return 1j * cls.basis.filter3 * cls.basis.wavenumbers
+
+        return HyperDiffusionFourier
 
     @CachedAttribute
     def HilbertTransform(self):

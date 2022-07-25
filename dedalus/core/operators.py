@@ -1196,6 +1196,52 @@ class Separable(LinearBasisOperator, FutureField):
     def vector_form(self):
         raise NotImplementedError()
 
+class SeparableFilter(LinearBasisOperator, FutureField):
+
+    def operator_form(self, index):
+        return self.vector_form()[index[self.axis]]
+
+    def check_conditions(self):
+        arg0, = self.args
+        axis = self.axis
+        # Must be in coeff layout
+        is_coeff = not arg0.layout.grid_space[axis]
+        return is_coeff
+
+    def operate(self, out):
+        arg0, = self.args
+        axis = self.axis
+        # Require coeff layout
+        arg0.require_coeff_space(axis)
+        out.layout = arg0.layout
+        # Attempt forms
+        try:
+            self.explicit_form(arg0.data, out.data, axis)
+        except NotImplementedError:
+            self.apply_vector_form(out)
+
+    def apply_vector_form(self, out):
+        arg0, = self.args
+        axis = self.axis
+        dim = arg0.domain.dim
+        slices = arg0.layout.slices(self.domain.dealias)
+        vector = self.vector_form()
+        #diff = np.oneslike(arg0.data,dtype=complex)
+        #diff[20::] = 1j
+        #vector = diff *
+        vector = vector[slices[axis]]
+        vector = reshape_vector(vector, dim=dim, axis=axis)
+        vector = np.zeros_like(arg0.data)
+        vector[0:20] = 1
+        vector[20::] = 1j
+        np.multiply(arg0.data, vector, out=out.data)
+
+    def explicit_form(self, input, output, axis):
+        raise NotImplementedError()
+
+    def vector_form(self):
+        raise NotImplementedError()
+
 
 class Coupled(LinearBasisOperator, FutureField):
 
@@ -1419,6 +1465,128 @@ class Differentiate(LinearBasisOperator, metaclass=SkipDispatch):
                 arg0a, arg0b = arg0.args
                 return (op(arg0a)*arg0b + arg0a*op(arg0b)).expand(*vars)
         return self
+
+class DifferentiateFilter(LinearBasisOperator, metaclass=SkipDispatch):
+
+    name = 'df'
+
+    @classmethod
+    def __dispatch__(cls, arg0, **kw):
+        # Cast to operand
+        arg0 = Operand.cast(arg0)
+        # Check if operand depends on basis
+        if cls.basis not in arg0.domain.bases:
+            raise SkipDispatchException(0)
+        elif arg0.meta[cls.basis.name]['constant']:
+            raise SkipDispatchException(0)
+        else:
+            return (arg0,), kw
+
+    def __init__(self, arg0, **kw):
+        # Cast argument to field
+        arg0 = Field.cast(arg0, arg0.domain)
+        super().__init__(arg0, **kw)
+        self.axis = self.domain.bases.index(self.basis)
+
+    def meta_constant(self, axis):
+        # Preserve constancy
+        return self.args[0].meta[axis]['constant']
+
+    def expand(self, *vars):
+        """Distribute over sums and apply the product rule to arguments
+        containing specified variables (default: all)."""
+        arg0 = self.args[0]
+        if (not vars) or arg0.has(*vars):
+            op = type(self)
+            arg0 = arg0.expand(*vars)
+            if isinstance(arg0, Add):
+                arg0a, arg0b = arg0.args
+                return (op(arg0a) + op(arg0b)).expand(*vars)
+            if isinstance(arg0, Multiply):
+                arg0a, arg0b = arg0.args
+                return (op(arg0a)*arg0b + arg0a*op(arg0b)).expand(*vars)
+        return self
+
+class HyperDiffusion(LinearBasisOperator, metaclass=SkipDispatch):
+
+    name = 'hd'
+
+    @classmethod
+    def __dispatch__(cls, arg0, **kw):
+        # Cast to operand
+        arg0 = Operand.cast(arg0)
+        # Check if operand depends on basis
+        if cls.basis not in arg0.domain.bases:
+            raise SkipDispatchException(0)
+        elif arg0.meta[cls.basis.name]['constant']:
+            raise SkipDispatchException(0)
+        else:
+            return (arg0,), kw
+
+    def __init__(self, arg0, **kw):
+        # Cast argument to field
+        arg0 = Field.cast(arg0, arg0.domain)
+        super().__init__(arg0, **kw)
+        self.axis = self.domain.bases.index(self.basis)
+
+    def meta_constant(self, axis):
+        # Preserve constancy
+        return self.args[0].meta[axis]['constant']
+
+    def expand(self, *vars):
+        """Distribute over sums and apply the product rule to arguments
+        containing specified variables (default: all)."""
+        arg0 = self.args[0]
+        if (not vars) or arg0.has(*vars):
+            op = type(self)
+            arg0 = arg0.expand(*vars)
+            if isinstance(arg0, Add):
+                arg0a, arg0b = arg0.args
+                return (op(arg0a) + op(arg0b)).expand(*vars)
+            if isinstance(arg0, Multiply):
+                arg0a, arg0b = arg0.args
+                return (op(arg0a)*arg0b + arg0a*op(arg0b)).expand(*vars)
+        return self
+
+@parseable
+@addname('df')
+def differentiateFilter(arg0, *bases, out=None, **basis_kw):
+    # Cast to operand
+    arg0 = Operand.cast(arg0)
+    if isinstance(arg0, (Scalar, FutureScalar)):
+        return 0
+    # Parse keyword bases
+    for basis, order in basis_kw.items():
+        bases += (basis,) * order
+    # Require at least one basis
+    if len(bases) == 0:
+        raise ValueError("No basis specified.")
+    # Multiple bases: apply recursively
+    if len(bases) > 1:
+        arg0 = differentiateFilter(arg0, *bases[:-1])
+    # Call with single basis
+    basis = arg0.domain.get_basis_object(bases[-1])
+    return basis.DifferentiateFilter(arg0, out=out)
+
+@parseable
+@addname('hd')
+def hyperDiffusion(arg0, *bases, out=None, **basis_kw):
+    # Cast to operand
+    arg0 = Operand.cast(arg0)
+    if isinstance(arg0, (Scalar, FutureScalar)):
+        return 0
+    # Parse keyword bases
+    for basis, order in basis_kw.items():
+        bases += (basis,) * order
+    # Require at least one basis
+    if len(bases) == 0:
+        raise ValueError("No basis specified.")
+    # Multiple bases: apply recursively
+    if len(bases) > 1:
+        arg0 = hyperDiffusion(arg0, *bases[:-1])
+    # Call with single basis
+    basis = arg0.domain.get_basis_object(bases[-1])
+    return basis.HyperDiffusion(arg0, out=out)
 
 
 @parseable
