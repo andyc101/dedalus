@@ -16,6 +16,8 @@
   <img alt="PyPI - License" src="https://img.shields.io/pypi/l/dedalus">
 </p>
 
+**Note: Implementation of 'smart' hyperdiffusion in Dedalus v2. Forked by Andrew Clarke, 25/7/2022.
+
 **Note: this branch is the development head of v2 of the codebase.
 The development head of v3 of the codebase is on the ["master" branch](https://github.com/DedalusProject/dedalus/tree/master).**
 
