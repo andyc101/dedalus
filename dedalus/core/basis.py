@@ -1814,6 +1814,20 @@ class Fourier(TransverseBasis):
         # Build native wavenumbers, discarding any Nyquist mode
         kmax = (self.base_grid_size - 1) // 2
         kmax=int(kmax)
+
+        grid_type=0
+        if self.grid_dtype == np.float64:
+            native_wavenumbers = np.arange(0, kmax+1)
+            grid_type=1
+        elif self.grid_dtype == np.complex128:
+            native_wavenumbers = np.roll(np.arange(-kmax, kmax+1), -kmax)
+            grid_type=2
+        # Scale native wavenumbers
+        self.elements = self.wavenumbers = native_wavenumbers / self._grid_stretch
+        self.coeff_size = self.elements.size
+        #print("wavenumbers:",self.wavenumbers)
+
+
         self.filter1=np.zeros(kmax+1,dtype=np.complex128)         #my code
         self.filter1[self.cutoff::]=1j
         hyp=self.hyp
@@ -1823,31 +1837,12 @@ class Fourier(TransverseBasis):
             if i>self.cutoff:
                 self.filter2[i] = hyp**(i-self.cutoff)
                 self.filter3[i] = np.sqrt(hyp**(i-self.cutoff))
-        #print("filter1:",self.filter1)
-        #print("filter2:",self.filter2)
-        #print("filter3:",self.filter3)
-        """
-        need to edit this to make the hyperdiffusion work correctly.
-        need to multiply self.wavenumbers by sqrt of some coefficient, and then
-        perform the operation twice, which should square it back out for
-        the proper hyperdiffusion term. May also need to raise
-        self.wavenumbers to a power of some sort, too tired to work
-        it out right now.
 
-        self.power = np.ones(kmax+1)
-        hyp=self.hyp
-        for i in range(kmax+1):
-            self.power[i] =
-        #my code
-        """
-        if self.grid_dtype == np.float64:
-            native_wavenumbers = np.arange(0, kmax+1)
-        elif self.grid_dtype == np.complex128:
-            native_wavenumbers = np.roll(np.arange(-kmax, kmax+1), -kmax)
-        # Scale native wavenumbers
-        self.elements = self.wavenumbers = native_wavenumbers / self._grid_stretch
-        self.coeff_size = self.elements.size
-        #print("wavenumbers:",self.wavenumbers)
+        if grid_type==2:
+            self.filter1 = np.concatenate((self.filter1,np.flip(self.filter1)[0:-1]))
+            self.filter2 = np.concatenate((self.filter2,np.flip(self.filter2)[0:-1]))
+            self.filter3 = np.concatenate((self.filter3,np.flip(self.filter3)[0:-1]))
+
         return self.coeff_dtype
 
     def _resize_real_coeffs(self, cdata_in, cdata_out, axis, grid_size):
